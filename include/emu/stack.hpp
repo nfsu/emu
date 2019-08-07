@@ -1,6 +1,5 @@
 #pragma once
 #include "types/types.hpp"
-#include "memory.hpp"
 
 namespace emu {
 
