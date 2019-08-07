@@ -153,33 +153,33 @@ namespace emu {
 		a = c;
 	}
 
-	template<typename AddressType>
-	_inline_ void strb(Memory<AddressType> &mem, AddressType val, AddressType dst, AddressType off) { mem.set(dst + off, u8(val)); }
+	template<typename Memory, typename AddressType>
+	_inline_ void strb(Memory &mem, AddressType val, AddressType dst, AddressType off) { mem.set(dst + off, u8(val)); }
 
-	template<typename AddressType>
-	_inline_ void strh(Memory<AddressType> &mem, AddressType val, AddressType dst, AddressType off) { mem.set(dst + off, u16(val)); }
+	template<typename Memory, typename AddressType>
+	_inline_ void strh(Memory &mem, AddressType val, AddressType dst, AddressType off) { mem.set(dst + off, u16(val)); }
 
-	template<typename AddressType>
-	_inline_ void str(Memory<AddressType> &mem, AddressType val, AddressType dst, AddressType off) { mem.set(dst + off, u32(val)); }
+	template<typename Memory, typename AddressType>
+	_inline_ void str(Memory &mem, AddressType val, AddressType dst, AddressType off) { mem.set(dst + off, u32(val)); }
 
-	template<typename AddressType>
-	_inline_ void ldrb(Memory<AddressType> &mem, AddressType &val, AddressType dst, AddressType off) { val = mem.get<u8>(dst + off); }
+	template<typename Memory, typename AddressType>
+	_inline_ void ldrb(Memory &mem, AddressType &val, AddressType dst, AddressType off) { val = mem.get<u8>(dst + off); }
 
-	template<typename AddressType>
-	_inline_ void ldrh(Memory<AddressType> &mem, AddressType &val, AddressType dst, AddressType off) { val = mem.get<u16>(dst + off); }
+	template<typename Memory, typename AddressType>
+	_inline_ void ldrh(Memory &mem, AddressType &val, AddressType dst, AddressType off) { val = mem.get<u16>(dst + off); }
 
-	template<typename AddressType>
-	_inline_ void ldr(Memory<AddressType> &mem, AddressType &val, AddressType dst, AddressType off) { val = mem.get<u32>(dst + off); }
+	template<typename Memory, typename AddressType>
+	_inline_ void ldr(Memory &mem, AddressType &val, AddressType dst, AddressType off) { val = mem.get<u32>(dst + off); }
 
 	//Copy signed byte into register
-	template<typename AddressType>
-	_inline_ void ldsb(Memory<AddressType> &mem, AddressType &val, AddressType dst, AddressType off) {
+	template<typename Memory, typename AddressType>
+	_inline_ void ldsb(Memory &mem, AddressType &val, AddressType dst, AddressType off) {
 		val = AddressType(Signed_v<AddressType>(mem.get<i8>(dst + off)));
 	}
 
 	//Copy signed short into register
-	template<typename AddressType>
-	_inline_ void ldsh(Memory<AddressType> &mem, AddressType &val, AddressType dst, AddressType off) {
+	template<typename Memory, typename AddressType>
+	_inline_ void ldsh(Memory &mem, AddressType &val, AddressType dst, AddressType off) {
 		val = AddressType(Signed_v<AddressType>(mem.get<i16>(dst + off)));
 	}
 

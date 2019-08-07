@@ -10,16 +10,16 @@ namespace emu {
 	//If ascending = true, the stack pointer will increase if you push (memory address grows), otherwise it will decrease
 	//If isEmpty = true, the stack pointer will point to the next address where something should be pushed. Otherwise points to last object pushed
 	template<
-		typename T, typename AddressSpace,
+		typename T, typename AddressSpace, typename Memory,
 		bool isAscending = false, bool isEmpty = false
 	>
-	class Stack {
+	class TStack {
 
 	public:
 
 		static constexpr AddressSpace increment = !isAscending ? (~AddressSpace(sizeof(T))) + 1 : AddressSpace(sizeof(T));
 
-		_inline_ static void push(Memory<AddressSpace> &m, AddressSpace &sp, const T &a) {
+		_inline_ static void push(Memory &m, AddressSpace &sp, const T &a) {
 
 			if constexpr (!isEmpty) {
 				sp += increment;
@@ -32,12 +32,12 @@ namespace emu {
 		}
 
 		template<typename ...args>
-		_inline_ static void push(Memory<AddressSpace> &m, AddressSpace &sp, const T &a, const args &...arg) {
+		_inline_ static void push(Memory &m, AddressSpace &sp, const T &a, const args &...arg) {
 			push(m, sp, a);
 			push(m, sp, arg...);
 		}
 
-		_inline_ static void pop(const Memory<AddressSpace> &m, AddressSpace &sp, T &a) {
+		_inline_ static void pop(const Memory &m, AddressSpace &sp, T &a) {
 
 			if constexpr (!isEmpty) {
 				a = m.get<T>(sp);
@@ -50,7 +50,7 @@ namespace emu {
 		}
 
 		template<typename ...args>
-		_inline_ static void pop(const Memory<AddressSpace> &m, AddressSpace &sp, T &a, args &...arg) {
+		_inline_ static void pop(const Memory &m, AddressSpace &sp, T &a, args &...arg) {
 			pop(m, sp, a);
 			pop(m, sp, arg...);
 		}
@@ -59,10 +59,7 @@ namespace emu {
 
 	//Different stack types
 
-	template<bool isAscending, bool isEmpty>
-	using Stack32 = Stack<u32, u32, isAscending, isEmpty>;
-
-	template<bool isAscending, bool isEmpty>
-	using Stack64 = Stack<u64, u64, isAscending, isEmpty>;
+	template<typename Memory, typename AddressType, bool isAscending = false, bool isEmpty = false>
+	using Stack = TStack<AddressType, AddressType, Memory, isAscending, isEmpty>;
 
 }
