@@ -3,15 +3,6 @@
 
 namespace emu {
 
-	template<typename T> struct Signed {};
-	template<> struct Signed<u8> { using v = i8; };
-	template<> struct Signed<u16> { using v = i16; };
-	template<> struct Signed<u32> { using v = i32; };
-	template<> struct Signed<u64> { using v = i64; };
-
-	template<typename T>
-	using Signed_v = typename Signed<T>::v;
-
 	template<typename T>
 	constexpr T bitSize = T(sizeof(T) * 8);
 
@@ -99,7 +90,7 @@ namespace emu {
 	template<typename CPSR, typename T, bool S = true>
 	_inline_ T sub(CPSR &cpsr, T a, T b) {
 		T c = a - b; cpsr;
-		if constexpr (S) cpsr.setALU(a, T(-Signed_v<T>(b)), c);
+		if constexpr (S) cpsr.setALU<true>(a, T(-Signed_v<T>(b)), c);
 		return c;
 	}
 
@@ -108,17 +99,37 @@ namespace emu {
 		a = sub<CPSR, T, S>(cpsr, a, b);
 	}
 
+	template<typename CPSR, typename T, bool S = true>
+	_inline_ void sbcFrom(CPSR &cpsr, T &a, T b) {
+
+		T c = a;
+		a -= b;
+		if (cpsr.carry()) --a;
+
+		if constexpr (S) cpsr.setALU<true>(c, b, a);
+	}
+
 	//Add two values
 	template<typename CPSR, typename T, bool S = true>
 	_inline_ T add(CPSR &cpsr, T a, T b) {
 		T c = a + b; cpsr;
-		if constexpr (S) cpsr.setALU(a, b, c);
+		if constexpr (S) cpsr.setALU<false>(a, b, c);
 		return c;
 	}
 
 	template<typename CPSR, typename T, bool S = true>
 	_inline_ void addTo(CPSR &cpsr, T &a, T b) {
 		a = add<CPSR, T, S>(cpsr, a, b);
+	}
+
+	template<typename CPSR, typename T, bool S = true>
+	_inline_ void adcTo(CPSR &cpsr, T &a, T b) {
+
+		T c = a;
+		a += b;
+		if (cpsr.carry()) ++a;
+
+		if constexpr (S) cpsr.setALU<false>(c, b, a);
 	}
 
 	//And two values

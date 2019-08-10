@@ -16,7 +16,10 @@ namespace emu {
 
 	public:
 
-		static constexpr AddressSpace increment = !isAscending ? (~AddressSpace(sizeof(T))) + 1 : AddressSpace(sizeof(T));
+		static constexpr AddressSpace increment = 
+			!isAscending ? 
+			AddressSpace (-Signed_v<AddressSpace>(sizeof(T))) : 
+			AddressSpace(sizeof(T));
 
 		_inline_ static void push(Memory &m, AddressSpace &sp, const T &a) {
 
