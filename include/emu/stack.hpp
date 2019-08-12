@@ -39,7 +39,7 @@ namespace emu {
 			push(m, sp, arg...);
 		}
 
-		_inline_ static void pop(const Memory &m, AddressSpace &sp, T &a) {
+		_inline_ static void pop(Memory &m, AddressSpace &sp, T &a) {
 
 			if constexpr (!isEmpty) {
 				a = m.get<T>(sp);
@@ -52,7 +52,7 @@ namespace emu {
 		}
 
 		template<typename ...args>
-		_inline_ static void pop(const Memory &m, AddressSpace &sp, T &a, args &...arg) {
+		_inline_ static void pop(Memory &m, AddressSpace &sp, T &a, args &...arg) {
 			pop(m, sp, a);
 			pop(m, sp, arg...);
 		}
