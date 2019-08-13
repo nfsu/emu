@@ -49,8 +49,9 @@ namespace emu {
 		}
 
 		template<typename T, typename = std::enable_if_t<std::is_arithmetic_v<T> || std::is_pod_v<T>>>
-		constexpr _inline_ void operator=(const T &t) const {
+		constexpr _inline_ T operator=(const T &t) const {
 			Mapping::write(memory, v, t);
+			return t;
 		}
 
 	};
@@ -79,12 +80,13 @@ namespace emu {
 
 	};
 
-	template<typename AddressType, typename Mapping, usz flagCount>
+	template<typename AddressType, typename Mapping, usz numberCount>
 	class Memory {
 
 	public:
 
 		using Range = MemoryRange<AddressType>;
+		using Pointer = MemoryPointer<AddressType, Mapping, numberCount>;
 
 	private:
 
@@ -125,14 +127,21 @@ namespace emu {
 		//Gets the variable from the address (read)
 		template<typename T>
 		_inline_ const T get(AddressType ptr) {
-			return MemoryPointer<AddressType, Mapping, flagCount>((Memory*)this, ptr).operator T();
+			return Pointer((Memory*)this, ptr);
 		}
 
 		//Sets the variable at the address (write)
 		template<typename T>
 		_inline_ T set(AddressType ptr, const T &t) {
-			MemoryPointer<AddressType, Mapping, flagCount>(this, ptr).operator=(t);
+			Pointer(this, ptr) = t;
 			return t;
+		}
+
+		//Increment variable at the address
+		template<typename T, T incr = 1>
+		_inline_ T increment(AddressType ptr) {
+			Pointer mem(this, ptr);
+			return mem = T(mem.operator T() + incr);
 		}
 
 		Memory(const Memory&) = delete;
@@ -151,7 +160,8 @@ namespace emu {
 			return getBanked(bankRegister, bankId) + offset; 
 		}
 
-		Bitset<flagCount> flags;
+		//Values that are used to determine information about memory banks or program execution
+		Array<u32, numberCount> values;
 
 	private:
 
@@ -168,26 +178,26 @@ namespace emu {
 		static usz __forceinline map(u16 x) { return mapping | x; } 
 	};
 
-	template<typename MappingFunc, usz flagCount = 1>
-	using Memory16 = Memory<u16, MappingFunc, flagCount>;
+	template<typename MappingFunc, usz numberCount = 1>
+	using Memory16 = Memory<u16, MappingFunc, numberCount>;
 
-	template<typename MappingFunc, usz flagCount = 1>
-	using Memory32 = Memory<u32, MappingFunc, flagCount>;
+	template<typename MappingFunc, usz numberCount = 1>
+	using Memory32 = Memory<u32, MappingFunc, numberCount>;
 
-	template<typename MappingFunc, usz flagCount = 1>
-	using Memory64 = Memory<u64, MappingFunc, flagCount>;
+	template<typename MappingFunc, usz numberCount = 1>
+	using Memory64 = Memory<u64, MappingFunc, numberCount>;
 
 	#ifdef _WIN32
 
-		template<typename AddressType, typename Mapping, usz flagCount>
-		void Memory<AddressType, Mapping, flagCount>::allocate() {
+		template<typename AddressType, typename Mapping, usz numberCount>
+		void Memory<AddressType, Mapping, numberCount>::allocate() {
 
 			if (!VirtualAlloc(LPVOID(Mapping::virtualMemory[0]), Mapping::virtualMemory[1], MEM_RESERVE, PAGE_READWRITE))
 				oic::System::log()->fatal("Couldn't reserve memory");
 		}
 
-		template<typename AddressType, typename Mapping, usz flagCount>
-		void Memory<AddressType, Mapping, flagCount>::allocate(Range &r) {
+		template<typename AddressType, typename Mapping, usz numberCount>
+		void Memory<AddressType, Mapping, numberCount>::allocate(Range &r) {
 
 			usz map = Mapping::virtualMemory[0] | r.start;
 
@@ -202,22 +212,22 @@ namespace emu {
 				oic::System::log()->fatal("Couldn't protect memory");
 		}
 
-		template<typename AddressType, typename Mapping, usz flagCount>
-		void Memory<AddressType, Mapping, flagCount>::free() {
+		template<typename AddressType, typename Mapping, usz numberCount>
+		void Memory<AddressType, Mapping, numberCount>::free() {
 			VirtualFree(LPVOID(Mapping::virtualMemory[0]), 0, MEM_RELEASE);
 		}
 
 	#else
 
-		template<typename AddressType, typename Mapping, usz flagCount>
-		void Memory<AddressType, Mapping, flagCount>::allocate() {
+		template<typename AddressType, typename Mapping, usz numberCount>
+		void Memory<AddressType, Mapping, numberCount>::allocate() {
 
 			if(!mmap((void*)Mapping::virtualMemory[0], Mapping::virtualMemory[1], PROT_NONE, MAP_PRIVATE | MAP_FIXED, 0))
 				oic::System::log()->fatal("Couldn't reserve memory");
 		}
 
-		template<typename AddressType, typename Mapping, usz flagCount>
-		void Memory<AddressType, Mapping, flagCount>::allocate(Range &r) {
+		template<typename AddressType, typename Mapping, usz numberCount>
+		void Memory<AddressType, Mapping, numberCount>::allocate(Range &r) {
 
 			usz map = Mapping::virtualMemory[0] | r.start;
 			
@@ -230,8 +240,8 @@ namespace emu {
 				oic::System::log()->fatal("Couldn't protect memory");
 		}
 
-		template<typename AddressType, typename Mapping, usz flagCount>
-		void Memory<AddressType, Mapping, flagCount>::allocate() {
+		template<typename AddressType, typename Mapping, usz numberCount>
+		void Memory<AddressType, Mapping, numberCount>::allocate() {
 			munmap((void*)Mapping::virtualMemory[0], Mapping::virtualMemory[1]);
 		}
 
