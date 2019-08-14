@@ -24,11 +24,12 @@ namespace emu {
 		_inline_ static void push(Memory &m, AddressSpace &sp, const T &a) {
 
 			if constexpr (!isEmpty) {
-				sp += increment;
+				sp -= sizeof(T) - 1;
 				m.set(sp, a);
+				--sp;
 			} else {
-				m.set(sp, a);
 				sp += increment;
+				m.set(sp, a);
 			}
 
 		}
@@ -42,8 +43,9 @@ namespace emu {
 		_inline_ static void pop(Memory &m, AddressSpace &sp, T &a) {
 
 			if constexpr (!isEmpty) {
+				++sp;
 				a = m.get<T>(sp);
-				sp -= increment;
+				sp += sizeof(T) - 1;
 			} else {
 				sp -= increment;
 				a = m.get<T>(sp);

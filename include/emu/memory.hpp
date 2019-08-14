@@ -85,8 +85,6 @@ namespace emu {
 
 		static void initMemory(void *ou, usz size, const Buffer &mem) {
 
-			memset(ou, 0, size);
-
 			if (mem.size() <= size) {
 				if (mem.size() != 0) 
 					memcpy(ou, mem.data(), mem.size());
