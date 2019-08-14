@@ -24,22 +24,35 @@ namespace emu {
 		Buffer initMemory;
 
 		AddressType start, size;
-		bool write;
+		bool write, allocate;
 
-		explicit MemoryRange(AddressType start, AddressType size, bool write, String name, String altName, Buffer initMemory):
-			start(start), size(size), write(write), name(name), altName(altName), initMemory(initMemory) {}
+		//If !write, the memory range will be initialized and protected against writing
+		//If !allocate, the memory range won't be allocated but only reserved
+		explicit MemoryRange(
+			AddressType start, AddressType size, bool write, String name, String altName, 
+			Buffer initMemory, bool allocate = true
+		):
+			start(start), size(size), write(write), name(name), altName(altName), 
+			initMemory(initMemory), allocate(allocate) {}
+
+		usz end() const {
+			return usz(start) + size;
+		}
 
 	};
-	template<typename AddressType, typename Mapping, usz flagCount>
+
+	using ProgramMemoryRange = MemoryRange<usz>;
+
+	template<typename AddressType, typename Mapping>
 	class Memory;
 
-	template<typename AddressType, typename Mapping, usz flagCount>
+	template<typename AddressType, typename Mapping>
 	struct MemoryPointer {
 
-		Memory<AddressType, Mapping, flagCount> *memory;
+		Memory<AddressType, Mapping> *memory;
 		AddressType v;
 
-		constexpr MemoryPointer(Memory<AddressType, Mapping, flagCount> *memory, AddressType v): memory(memory), v(v) {}
+		constexpr MemoryPointer(Memory<AddressType, Mapping> *memory, AddressType v): memory(memory), v(v) {}
 
 		constexpr _inline_ usz addr() const { return Mapping::map(memory, v); }
 
@@ -56,72 +69,56 @@ namespace emu {
 
 	};
 
-	//Some things don't reside "in memory" for the emulated program
-	//But they are still present elsewhere; this data can be accessed by the memory mapper to simulate banked memory
-	struct MemoryBanks {
-
-		usz banks, bankSize;
-		Buffer allocated;
-
-		MemoryBanks(usz banks, usz bankSize): banks(banks), bankSize(bankSize), allocated(banks * bankSize) { }
-
-		MemoryBanks(usz banks, usz bankSize, Buffer def, usz offset, usz end): 
-			MemoryBanks(banks, bankSize) {
-			if (offset <= def.size() && end <= def.size())
-				memcpy(allocated.data(), def.data() + offset, 
-					   oic::Math::min(end - offset, allocated.size()));
-		}
-
-		//Get the address of the bank
-		//Out of bounds not checked
-		_inline_ usz bank(usz i) const {
-			return usz(allocated.data()) + i * bankSize;
-		}
-
-	};
-
-	template<typename AddressType, typename Mapping, usz numberCount>
+	template<typename AddressType, typename Mapping>
 	class Memory {
 
 	public:
 
 		using Range = MemoryRange<AddressType>;
-		using Pointer = MemoryPointer<AddressType, Mapping, numberCount>;
+		using Pointer = MemoryPointer<AddressType, Mapping>;
 
 	private:
 
-		static void allocate();
-		static void allocate(Range &r);
-		static void free();
+		static void reserve(usz start, usz end);
+		static void allocate(usz start, usz size, bool writable, const Buffer &initMemory);
+		static void free(usz start, usz end);
 
-		static void initMemory(Range &r, void *ou) {
+		static void initMemory(void *ou, usz size, const Buffer &mem) {
 
-			memset(ou, 0, r.size);
+			memset(ou, 0, size);
 
-			if (r.initMemory.size() <= r.size) {
-				if (r.initMemory.size() != 0) {
-					memcpy(ou, r.initMemory.data(), r.initMemory.size());
-					r.initMemory.clear();
-				}
+			if (mem.size() <= size) {
+				if (mem.size() != 0) 
+					memcpy(ou, mem.data(), mem.size());
 			} else
 				oic::System::log()->fatal("Couldn't initialize memory");
 		}
 
 	public:
 
-		Memory(const List<Range> &ranges_, const List<MemoryBanks> &banks): ranges(ranges_), banks(banks) {
+		//The program's regular memory and the simulated memory inside.
+		//The simulated ranges are always stored inside memory[0]
+		//The size of the reserved memory is assumed to be from memory[0].start til memory.last().end()
+		Memory(const List<ProgramMemoryRange> &memory_, const List<Range> &ranges_): ranges(ranges_), memory(memory_) {
 
 			static_assert(sizeof(AddressType) <= sizeof(usz), "32-bit architectures can't support 64 architectures");
 
-			allocate();
+			//Reserve all of the memory
+			reserve(memory[0].start, memory[memory.size() - 1].end());
 
+			//Allocate the memory to those ranges
+			for(ProgramMemoryRange &range : memory)
+				if (range.size && range.allocate)
+					allocate(range.start, range.size, range.write, range.initMemory);
+
+			//Allocate the virtual ranges
 			for (Range &range : ranges)
-				if(range.size)
-					allocate(range);
+				if(range.size && range.allocate)
+					allocate(memory[0].size + range.start, range.size, range.write, range.initMemory);
 		}
 
 		~Memory() {
-			free();
+			free(memory[0].start, memory[memory.size() - 1].end());
 		}
 
 		//Gets the variable from the address (read)
@@ -146,103 +143,85 @@ namespace emu {
 
 		Memory(const Memory&) = delete;
 		Memory(Memory&&) = delete;
-		//Memory &operator=(const Memory&) = delete;
-		//Memory &operator=(Memory&&) = delete;
+		Memory &operator=(const Memory&) = delete;
+		Memory &operator=(Memory&&) = delete;
 
 		_inline_ const List<Range> &getRanges() const { return ranges; }
-		_inline_ const List<MemoryBanks> &getBanks() const { return banks; }
+		_inline_ const List<ProgramMemoryRange> &getMemory() { return amemory; }
 
-		_inline_ usz getBanked(usz bankRegister, usz bankId) const { 
-			return banks[bankRegister].bank(bankId); 
+		template<typename T>
+		_inline_ T &getMemory(usz v) {
+			return *(T*)v;
 		}
-
-		_inline_ usz getBankedMemory(usz bankRegister, usz bankId, usz offset) const { 
-			return getBanked(bankRegister, bankId) + offset; 
-		}
-
-		//Values that are used to determine information about memory banks or program execution
-		Array<u32, numberCount> values;
 
 	private:
 
 		List<Range> ranges;
-		List<MemoryBanks> banks;
+		List<ProgramMemoryRange> memory;
 
 	};
 
-	template<usz start, usz size>
-	struct DefaultMappingFunc {
+	template<typename MappingFunc>
+	using Memory16 = Memory<u16, MappingFunc>;
 
-		static constexpr usz virtualMemory[2] = { start, size };
+	template<typename MappingFunc>
+	using Memory32 = Memory<u32, MappingFunc>;
 
-		static usz __forceinline map(u16 x) { return mapping | x; } 
-	};
-
-	template<typename MappingFunc, usz numberCount = 1>
-	using Memory16 = Memory<u16, MappingFunc, numberCount>;
-
-	template<typename MappingFunc, usz numberCount = 1>
-	using Memory32 = Memory<u32, MappingFunc, numberCount>;
-
-	template<typename MappingFunc, usz numberCount = 1>
-	using Memory64 = Memory<u64, MappingFunc, numberCount>;
+	template<typename MappingFunc>
+	using Memory64 = Memory<u64, MappingFunc>;
 
 	#ifdef _WIN32
 
-		template<typename AddressType, typename Mapping, usz numberCount>
-		void Memory<AddressType, Mapping, numberCount>::allocate() {
+		template<typename AddressType, typename Mapping>
+		void Memory<AddressType, Mapping>::reserve(usz start, usz size) {
 
-			if (!VirtualAlloc(LPVOID(Mapping::virtualMemory[0]), Mapping::virtualMemory[1], MEM_RESERVE, PAGE_READWRITE))
+			if (!VirtualAlloc(LPVOID(start), size, MEM_RESERVE, PAGE_READWRITE))
 				oic::System::log()->fatal("Couldn't reserve memory");
 		}
 
-		template<typename AddressType, typename Mapping, usz numberCount>
-		void Memory<AddressType, Mapping, numberCount>::allocate(Range &r) {
+		template<typename AddressType, typename Mapping>
+		void Memory<AddressType, Mapping>::allocate(usz start, usz size, bool write, const Buffer &mem) {
 
-			usz map = Mapping::virtualMemory[0] | r.start;
-
-			if (!VirtualAlloc(LPVOID(map), usz(r.size), MEM_COMMIT, PAGE_READWRITE))
+			if (!VirtualAlloc(LPVOID(start), size, MEM_COMMIT, PAGE_READWRITE))
 				oic::System::log()->fatal("Couldn't allocate memory");
 
-			initMemory(r, (void*)map);
+			initMemory((void*)start, size, mem);
 
 			DWORD oldProtect;
 
-			if (!r.write && !VirtualProtect((void*)map, usz(r.size), PAGE_READONLY, &oldProtect))
+			if (!write && !VirtualProtect((void*)start, size, PAGE_READONLY, &oldProtect))
 				oic::System::log()->fatal("Couldn't protect memory");
 		}
 
-		template<typename AddressType, typename Mapping, usz numberCount>
-		void Memory<AddressType, Mapping, numberCount>::free() {
-			VirtualFree(LPVOID(Mapping::virtualMemory[0]), 0, MEM_RELEASE);
+		template<typename AddressType, typename Mapping>
+		void Memory<AddressType, Mapping>::free(usz start, usz) {
+			VirtualFree(LPVOID(start), 0, MEM_RELEASE);
 		}
 
 	#else
 
-		template<typename AddressType, typename Mapping, usz numberCount>
-		void Memory<AddressType, Mapping, numberCount>::allocate() {
+		template<typename AddressType, typename Mapping>
+		void Memory<AddressType, Mapping>::reserve(usz start, usz size) {
 
-			if(!mmap((void*)Mapping::virtualMemory[0], Mapping::virtualMemory[1], PROT_NONE, MAP_PRIVATE | MAP_FIXED, 0))
+			if(!mmap((void*)start, size, PROT_NONE, MAP_PRIVATE | MAP_FIXED, 0))
 				oic::System::log()->fatal("Couldn't reserve memory");
 		}
 
-		template<typename AddressType, typename Mapping, usz numberCount>
-		void Memory<AddressType, Mapping, numberCount>::allocate(Range &r) {
+		template<typename AddressType, typename Mapping>
+		void Memory<AddressType, Mapping>::allocate(usz start, usz size, bool writable, const Buffer &initMemory) {
 
-			usz map = Mapping::virtualMemory[0] | r.start;
-			
-			if(!mmap((void*)map, usz(r.size), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, 0))
+			if(!mmap((void*)start, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, 0))
 				oic::System::log()->fatal("Couldn't allocate memory");
 
-			initMemory(r, (void*)map);
+			initMemory((void*)start, size, initMemory);
 
-			if (!r.write && mprotect((void*)map, usz(r.size), PROT_READ))
+			if (!write && mprotect((void*)start, size, PROT_READ))
 				oic::System::log()->fatal("Couldn't protect memory");
 		}
 
-		template<typename AddressType, typename Mapping, usz numberCount>
-		void Memory<AddressType, Mapping, numberCount>::allocate() {
-			munmap((void*)Mapping::virtualMemory[0], Mapping::virtualMemory[1]);
+		template<typename AddressType, typename Mapping>
+		void Memory<AddressType, Mapping>::allocate(usz start, usz end) {
+			munmap((void*)start, end - start);
 		}
 
 	#endif
