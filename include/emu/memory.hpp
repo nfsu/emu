@@ -152,6 +152,13 @@ namespace emu {
 			return *(T*)v;
 		}
 
+		//Get the T& of the currently accessible memory
+		//This should only be used with STATIC addresses; like I/O registers.
+		template<typename T>
+		_inline_ T &getRef(AddressType t) {
+			return *(T*)(Mapping::mapping | t);
+		}
+
 	private:
 
 		List<Range> ranges;
