@@ -1,18 +1,14 @@
 #pragma once
 #include "types/types.hpp"
 #include "system/system.hpp"
+#include "system/allocator.hpp"
 #include "system/log.hpp"
 #include "utils/math.hpp"
-#define _inline_ 
 
-#ifdef _WIN32
-#include <Windows.h>
-#undef min
-#undef max
-#undef far
-#undef near
+#ifdef NDEBUG
+	#define _inline_ __forceinline
 #else
-#include <sys/mman.h>
+	#define _inline_
 #endif
 
 namespace emu {
@@ -28,14 +24,14 @@ namespace emu {
 
 		//If !write, the memory range will be initialized and protected against writing
 		//If !allocate, the memory range won't be allocated but only reserved
-		explicit MemoryRange(
+		_inline_ explicit MemoryRange(
 			AddressType start, AddressType size, bool write, String name, String altName, 
 			Buffer initMemory, bool allocate = true
 		):
 			start(start), size(size), write(write), name(name), altName(altName), 
 			initMemory(initMemory), allocate(allocate) {}
 
-		usz end() const {
+		_inline_ usz end() const {
 			return usz(start) + size;
 		}
 
@@ -46,8 +42,49 @@ namespace emu {
 	template<typename AddressType, typename Mapping>
 	class Memory;
 
-	template<typename AddressType, typename Mapping>
+	template<typename AddressType, typename Mapping, typename T = void>
 	struct MemoryPointer {
+
+		Memory<AddressType, Mapping> *memory;
+		AddressType v;
+
+		constexpr MemoryPointer(Memory<AddressType, Mapping> *memory, AddressType v): memory(memory), v(v) {
+		
+			static_assert(
+				std::is_arithmetic_v<T> || std::is_pod_v<T>, 
+				"Typed MemoryPointer requires an arithmetic or pod type"
+			);
+		}
+
+		constexpr _inline_ operator T() const {
+			return Mapping::read<T>(memory, v);
+		}
+
+		constexpr _inline_ const MemoryPointer &operator=(const T &t) const {
+			Mapping::write(memory, v, t);
+			return *this;
+		}
+
+		constexpr _inline_ const MemoryPointer &operator+=(T t) const {
+			t += Mapping::read<T>(memory, v);
+			Mapping::write(memory, v, t);
+			return *this;
+		}
+
+		constexpr _inline_ const MemoryPointer &operator|=(T t) const {
+			t |= Mapping::read<T>(memory, v);
+			Mapping::write(memory, v, t);
+			return *this;
+		}
+
+		constexpr _inline const MemoryPointer &operator++() const {
+			return operator+=(1);
+		}
+
+	};
+
+	template<typename AddressType, typename Mapping>
+	struct MemoryPointer<AddressType, Mapping, void> {
 
 		Memory<AddressType, Mapping> *memory;
 		AddressType v;
@@ -77,27 +114,23 @@ namespace emu {
 		using Range = MemoryRange<AddressType>;
 		using Pointer = MemoryPointer<AddressType, Mapping>;
 
+		template<typename T>
+		using TypedPointer = MemoryPointer<AddressType, Mapping, T>;
+
 	private:
 
-		static void reserve(usz start, usz end);
-		static void allocate(usz start, usz size, bool writable, const Buffer &initMemory);
-		static void free(usz start, usz end);
-
-		static void initMemory(void *ou, usz size, const Buffer &mem) {
-
-			if (mem.size() <= size) {
-				if (mem.size() != 0) 
-					memcpy(ou, mem.data(), mem.size());
-			} else
-				oic::System::log()->fatal("Couldn't initialize memory");
-		}
+		static _inline_ void reserve(usz start, usz end);
+		static _inline_ void allocate(usz start, usz size, bool writable, const Buffer &initMemory);
+		static _inline_ void free(usz start, usz end);
 
 	public:
 
 		//The program's regular memory and the simulated memory inside.
 		//The simulated ranges are always stored inside memory[0]
 		//The size of the reserved memory is assumed to be from memory[0].start til memory.last().end()
-		Memory(const List<ProgramMemoryRange> &memory_, const List<Range> &ranges_): ranges(ranges_), memory(memory_) {
+		Memory(const List<ProgramMemoryRange> &memory_, const List<Range> &ranges_):
+			ranges(ranges_), memory(memory_)
+		{
 
 			static_assert(sizeof(AddressType) <= sizeof(usz), "32-bit architectures can't support 64 architectures");
 
@@ -125,11 +158,16 @@ namespace emu {
 			return Pointer((Memory*)this, ptr);
 		}
 
+		//Gets the variable from the address (read)
+		template<typename T = u8>
+		_inline_ const TypedPointer<T> operator[](AddressType ptr) {
+			return TypedPointer<T>((Memory*)this, ptr);
+		}
+
 		//Sets the variable at the address (write)
 		template<typename T>
-		_inline_ T set(AddressType ptr, const T &t) {
+		_inline_ void set(AddressType ptr, const T &t) {
 			Pointer(this, ptr) = t;
-			return t;
 		}
 
 		//Increment variable at the address
@@ -145,7 +183,7 @@ namespace emu {
 		Memory &operator=(Memory&&) = delete;
 
 		_inline_ const List<Range> &getRanges() const { return ranges; }
-		_inline_ const List<ProgramMemoryRange> &getMemory() { return amemory; }
+		_inline_ const List<ProgramMemoryRange> &getMemory() { return memory; }
 
 		template<typename T>
 		_inline_ T &getMemory(usz v) {
@@ -175,60 +213,31 @@ namespace emu {
 	template<typename MappingFunc>
 	using Memory64 = Memory<u64, MappingFunc>;
 
-	#ifdef _WIN32
+	template<typename AddressType, typename Mapping>
+	void Memory<AddressType, Mapping>::reserve(usz start, usz size) {
 
-		template<typename AddressType, typename Mapping>
-		void Memory<AddressType, Mapping>::reserve(usz start, usz size) {
+		if(!oic::System::allocator()->allocRange(start, size, (u8*)nullptr, oic::Allocator::RESERVE))
+			oic::System::log()->fatal("Couldn't reserve memory");
+	}
 
-			if (!VirtualAlloc(LPVOID(start), size, MEM_RESERVE, PAGE_READWRITE))
-				oic::System::log()->fatal("Couldn't reserve memory");
-		}
+	template<typename AddressType, typename Mapping>
+	void Memory<AddressType, Mapping>::allocate(usz start, usz size, bool write, const Buffer &mem) {
 
-		template<typename AddressType, typename Mapping>
-		void Memory<AddressType, Mapping>::allocate(usz start, usz size, bool write, const Buffer &mem) {
+		if (mem.size() > size)
+			oic::System::log()->fatal("Couldn't initialize memory");
 
-			if (!VirtualAlloc(LPVOID(start), size, MEM_COMMIT, PAGE_READWRITE))
-				oic::System::log()->fatal("Couldn't allocate memory");
+		auto commitFlags = write ? oic::Allocator::COMMIT : oic::Allocator::READ_ONLY | oic::Allocator::COMMIT;
 
-			initMemory((void*)start, size, mem);
+		if(!oic::System::allocator()->allocRange(
+			start, size, mem.data(), oic::Allocator::RangeHint(commitFlags)
+		))
+			oic::System::log()->fatal("Couldn't allocate memory");
 
-			DWORD oldProtect;
+	}
 
-			if (!write && !VirtualProtect((void*)start, size, PAGE_READONLY, &oldProtect))
-				oic::System::log()->fatal("Couldn't protect memory");
-		}
-
-		template<typename AddressType, typename Mapping>
-		void Memory<AddressType, Mapping>::free(usz start, usz) {
-			VirtualFree(LPVOID(start), 0, MEM_RELEASE);
-		}
-
-	#else
-
-		template<typename AddressType, typename Mapping>
-		void Memory<AddressType, Mapping>::reserve(usz start, usz size) {
-
-			if(!mmap((void*)start, size, PROT_NONE, MAP_PRIVATE | MAP_FIXED, 0))
-				oic::System::log()->fatal("Couldn't reserve memory");
-		}
-
-		template<typename AddressType, typename Mapping>
-		void Memory<AddressType, Mapping>::allocate(usz start, usz size, bool writable, const Buffer &initMemory) {
-
-			if(!mmap((void*)start, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, 0))
-				oic::System::log()->fatal("Couldn't allocate memory");
-
-			initMemory((void*)start, size, initMemory);
-
-			if (!write && mprotect((void*)start, size, PROT_READ))
-				oic::System::log()->fatal("Couldn't protect memory");
-		}
-
-		template<typename AddressType, typename Mapping>
-		void Memory<AddressType, Mapping>::allocate(usz start, usz end) {
-			munmap((void*)start, end - start);
-		}
-
-	#endif
+	template<typename AddressType, typename Mapping>
+	void Memory<AddressType, Mapping>::free(usz start, usz size) {
+		oic::System::allocator()->freeRange((u8*)start, size);
+	}
 
 }
